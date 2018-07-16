@@ -19,9 +19,7 @@ from bpy.props import BoolProperty, FloatProperty, IntProperty, EnumProperty
 import numpy as np
 
 def bbox_orient(bme_verts, mx):
-    '''
-    takes a lsit of BMverts ora  list of vectors
-    '''
+    ''' takes a lsit of BMverts ora  list of vectors '''
     if hasattr(bme_verts[0], 'co'):
         verts = [mx * v.co for v in bme_verts]
     else:
@@ -34,29 +32,10 @@ def bbox_orient(bme_verts, mx):
     return (min(xs), max(xs), min(ys), max(ys), min(zs), max(zs))
 
 def bbox_vol(box):
-    
     V = (box[1]-box[0]) * (box[3]-box[2]) * (box[5]-box[4])
-    
     return V
 
-def box_cords(box):
-    '''
-    returns vertices in same configuration as default cube in blender
-    easy to asign v.co of a cube primitive
-    '''
-    cords = [Vector((box[0],box[2],box[4])),
-             Vector((box[0],box[2],box[5])),
-             Vector((box[0],box[3],box[4])),
-             Vector((box[0],box[3],box[5])),
-             Vector((box[1],box[2],box[4])),
-             Vector((box[1],box[2],box[5])),
-             Vector((box[1],box[3],box[4])),
-             Vector((box[1],box[3],box[5])),
-             ]
-    
-    return cords
-
-def main(context, rand_sample, spin_res, make_sphere):
+def main(context, rand_sample, spin_res):
     start = time.time()
     #rand_sample = 400  #randomly select this many directions on a solid hemisphere to measure from
     #spin_res = 180   #180 steps is 0.5 degrees
@@ -104,8 +83,8 @@ def main(context, rand_sample, spin_res, make_sphere):
         axis = Vector((x,y,z))
         axes.append(axis)
         for n in range(0, spin_res):
-            angle = math.pi/2 * n/spin_res
-            rot_mx = Matrix.Rotation(angle,4,axis)
+            angle = math.pi/2 * float(n)/spin_res
+            rot_mx = Matrix.Rotation(angle, 4, axis)
             
             box = bbox_orient(hull_verts, rot_mx)
             test_V = bbox_vol(box)
@@ -123,9 +102,7 @@ def main(context, rand_sample, spin_res, make_sphere):
 
     bme.free() 
 
-    # qt = context.object.matrix_world.to_quaternion()
-    for i, v in enumerate(min_mx.to_quaternion()):
-        context.object.rotation_quaternion[i] = v
+    context.object.matrix_world = tr_mx * r_mx * min_mx * sc_mx
    
     
 class ObjectMinBoundBox(bpy.types.Operator):
@@ -134,11 +111,6 @@ class ObjectMinBoundBox(bpy.types.Operator):
     bl_label = "Min Bounding Box"
 
     # generic transform props
-    sample_vis = BoolProperty(
-            name="Visualize Sample",
-            description = 'add a sphere to the scene showing random direction sample',
-            default=False)
-
     area_sample = IntProperty(
             name="Iterations",
             description = 'number of random directions to test calipers in',
@@ -160,8 +132,6 @@ class ObjectMinBoundBox(bpy.types.Operator):
 
     def draw(self, context):
         layout = self.layout
-        row =layout.row()
-        row.prop(self, "sample_vis")
         
         row =layout.row()
         row.prop(self, "area_sample")
@@ -171,7 +141,8 @@ class ObjectMinBoundBox(bpy.types.Operator):
     
     
     def execute(self, context):
-        main(context, self.area_sample, self.angular_sample, self.sample_vis)
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+        main(context, self.area_sample, self.angular_sample)
         return {'FINISHED'}
 
 
