@@ -62,19 +62,9 @@ def main(context, rand_sample, spin_res):
     hull_verts = [item for item in total_hull if hasattr(item, 'co')]
     hull_faces = [item for item in total_hull if hasattr(item, 'no')]
     
-    min_mx = Matrix.Identity(4)
-    min_box = bbox_orient(hull_verts, min_mx)
-    min_V = bbox_vol(min_box)
-    print('initial volume %f' % min_V)
-    min_axis = Vector((0,0,1))
-    min_angle = 0
-    axes = []
-    for i in range(0,rand_sample):
-        u = random.random()
-        v = random.random()
-        
-        theta = math.pi * u  
-        phi =  math.acos(2 * v - 1)
+    def _sample(iu, iv):
+        theta = math.pi * iu  
+        phi =  math.acos(2 * iv - 1)
         
         x = math.cos(theta) * math.sin(phi)
         y = math.sin(theta) * math.sin(phi)  
@@ -82,6 +72,8 @@ def main(context, rand_sample, spin_res):
         
         axis = Vector((x,y,z))
         axes.append(axis)
+
+        imin_v = None
         for n in range(0, spin_res):
             angle = math.pi/2 * float(n)/spin_res
             rot_mx = Matrix.Rotation(angle, 4, axis)
@@ -89,15 +81,83 @@ def main(context, rand_sample, spin_res):
             box = bbox_orient(hull_verts, rot_mx)
             test_V = bbox_vol(box)
             
-            if test_V < min_V:
-                min_V = test_V
-                min_axis = axis
-                min_angle = angle
-                min_box = box
+            if test_V < imin_v or imin_v == None:
+                imin_v = test_V
                 min_mx = rot_mx
 
+        return imin_v, min_mx
+
+    def _grid_search(minx, maxx, 
+                     miny, maxy, 
+                     spread, depth):
+        xstep = (maxx - minx)/spread
+        ystep = (maxy - miny)/spread
+
+        imin_v, imin_mx = _sample(minx, miny)
+
+        next_x, next_y = 0, 0
+        for y in range(spread):
+            for x in range(spread):
+                sx = xstep/2 + x * xstep
+                sy = ystep/2 + y * ystep
+                mv, mx = _sample(sx, sy)
+                if mv < imin_v:
+                    imin_v = mv
+                    imin_mx = mx
+                    next_x = x
+                    next_y = y
+
+        if depth > 0:
+            return _grid_search(next_x * xstep, next_x * xstep + xstep, next_y * ystep, next_y * ystep + ystep, spread, depth - 1)
+        else:
+            return imin_v, imin_mx
+
+
+    min_mx = Matrix.Identity(4)
+    min_box = bbox_orient(hull_verts, min_mx)
+    min_V = bbox_vol(min_box)
+    print('initial volume %f' % min_V)
+    min_axis = Vector((0,0,1))
+    min_angle = 0
+    axes = []
+
+    min_V, min_mx = _grid_search(0.0, 1.0, 0.0, 1.0, 4, 4)
+
+    # for i in range(0,rand_sample):
+    #     u = random.random()
+    #     v = random.random()
+
+    #     mv, mx = _sample(u, v)
+
+    #     if mv < min_V:
+    #         min_V = mv
+    #         min_mx = mx
+        
+        # theta = math.pi * u  
+        # phi =  math.acos(2 * v - 1)
+        
+        # x = math.cos(theta) * math.sin(phi)
+        # y = math.sin(theta) * math.sin(phi)  
+        # z = math.cos(phi)
+        
+        # axis = Vector((x,y,z))
+        # axes.append(axis)
+        # for n in range(0, spin_res):
+        #     angle = math.pi/2 * float(n)/spin_res
+        #     rot_mx = Matrix.Rotation(angle, 4, axis)
+            
+        #     box = bbox_orient(hull_verts, rot_mx)
+        #     test_V = bbox_vol(box)
+            
+        #     if test_V < min_V:
+        #         min_V = test_V
+        #         min_axis = axis
+        #         min_angle = angle
+        #         min_box = box
+        #         min_mx = rot_mx
+
     elapsed_time = time.time() - start
-    print('did %i iterations in %f seconds' % (rand_sample*spin_res, elapsed_time))
+    print('%f seconds' % (elapsed_time))
     print("final volume %f" % bbox_vol(min_box))     
 
     bme.free() 
