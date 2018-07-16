@@ -14,9 +14,12 @@ import bmesh
 import math
 import random
 import time
+import mathutils as mu
 from mathutils import Vector, Matrix
 from bpy.props import BoolProperty, FloatProperty, IntProperty, EnumProperty
 import numpy as np
+
+import heapq
 
 def bbox_orient(bme_verts, mx):
     ''' takes a lsit of BMverts ora  list of vectors '''
@@ -35,7 +38,7 @@ def bbox_vol(box):
     V = (box[1]-box[0]) * (box[3]-box[2]) * (box[5]-box[4])
     return V
 
-def main(context, rand_sample, spin_res):
+def main(context, rand_sample):
     start = time.time()
     #rand_sample = 400  #randomly select this many directions on a solid hemisphere to measure from
     #spin_res = 180   #180 steps is 0.5 degrees
@@ -62,107 +65,107 @@ def main(context, rand_sample, spin_res):
     hull_verts = [item for item in total_hull if hasattr(item, 'co')]
     hull_faces = [item for item in total_hull if hasattr(item, 'no')]
     
-    def _sample(iu, iv):
+    def _sample(iu, iv, iz):
         theta = math.pi * iu  
-        phi =  math.acos(2 * iv - 1)
+        phi =  math.acos(2 * (iv % 1.0) - 1)
         
         x = math.cos(theta) * math.sin(phi)
         y = math.sin(theta) * math.sin(phi)  
         z = math.cos(phi)
         
         axis = Vector((x,y,z))
-        axes.append(axis)
 
-        imin_v = None
-        for n in range(0, spin_res):
-            angle = math.pi/2 * float(n)/spin_res
-            rot_mx = Matrix.Rotation(angle, 4, axis)
-            
-            box = bbox_orient(hull_verts, rot_mx)
-            test_V = bbox_vol(box)
-            
-            if test_V < imin_v or imin_v == None:
-                imin_v = test_V
-                min_mx = rot_mx
+        angle = math.pi/2 * iz
+        rot_mx = Matrix.Rotation(angle, 4, axis)
+        
+        box = bbox_orient(hull_verts, rot_mx)
+        test_V = bbox_vol(box)
 
-        return imin_v, min_mx
-
-    def _grid_search(minx, maxx, 
-                     miny, maxy, 
-                     spread, depth):
-        xstep = (maxx - minx)/spread
-        ystep = (maxy - miny)/spread
-
-        imin_v, imin_mx = _sample(minx, miny)
-
-        next_x, next_y = 0, 0
-        for y in range(spread):
-            for x in range(spread):
-                sx = xstep/2 + x * xstep
-                sy = ystep/2 + y * ystep
-                mv, mx = _sample(sx, sy)
-                if mv < imin_v:
-                    imin_v = mv
-                    imin_mx = mx
-                    next_x = x
-                    next_y = y
-
-        if depth > 0:
-            return _grid_search(next_x * xstep, next_x * xstep + xstep, next_y * ystep, next_y * ystep + ystep, spread, depth - 1)
-        else:
-            return imin_v, imin_mx
+        return test_V, rot_mx
 
 
     min_mx = Matrix.Identity(4)
     min_box = bbox_orient(hull_verts, min_mx)
     min_V = bbox_vol(min_box)
-    print('initial volume %f' % min_V)
-    min_axis = Vector((0,0,1))
-    min_angle = 0
-    axes = []
+    #print('initial volume %f' % min_V)
 
-    min_V, min_mx = _grid_search(0.0, 1.0, 0.0, 1.0, 4, 4)
+    best = []
+    nudge_step = 0.0
+    max_w = 1.0
+    N = 0
 
-    # for i in range(0,rand_sample):
-    #     u = random.random()
-    #     v = random.random()
-
-    #     mv, mx = _sample(u, v)
-
-    #     if mv < min_V:
-    #         min_V = mv
-    #         min_mx = mx
+    for i in range(0,rand_sample):        
+        nse = (1.0-nudge_step) ** 2.0
         
-        # theta = math.pi * u  
-        # phi =  math.acos(2 * v - 1)
+        u = (random.random()-0.5) * nse
+        v = (random.random()-0.5) * nse
+        z = (random.random()-0.5) * nse
+
+        new_pt = mu.Vector((u, v, z))
+
+        # nudge
+        if len(best) > 0:
+            # cu, cv, cz = 0, 0, 0
+            # for t in best:
+            #     s = t[0] / max_w
+            #     cu += t[2] * s
+            #     cv += t[3] * s
+            #     cz += t[4] * s
+
+            # center = mu.Vector((cu, cv, cz))
+            if len(best) >= 2:
+                current  = mu.Vector((best[-1][2], best[-1][3], best[-1][4]))
+                # previous = mu.Vector((best[-2][2], best[-2][3], best[-2][4]))
+                # delta = current - previous
+                # new_pt += current + delta * 0.1 
+                new_pt += current
+            else:
+                new_pt += mu.Vector((best[-1][2], best[-1][3], best[-1][4]))
+        else:
+            new_pt += mu.Vector((0.5, 0.5, 0.5))
         
-        # x = math.cos(theta) * math.sin(phi)
-        # y = math.sin(theta) * math.sin(phi)  
-        # z = math.cos(phi)
-        
-        # axis = Vector((x,y,z))
-        # axes.append(axis)
-        # for n in range(0, spin_res):
-        #     angle = math.pi/2 * float(n)/spin_res
-        #     rot_mx = Matrix.Rotation(angle, 4, axis)
-            
-        #     box = bbox_orient(hull_verts, rot_mx)
-        #     test_V = bbox_vol(box)
-            
-        #     if test_V < min_V:
-        #         min_V = test_V
-        #         min_axis = axis
-        #         min_angle = angle
-        #         min_box = box
-        #         min_mx = rot_mx
+        nudge_step += 1.0/rand_sample
+        if nudge_step > 1.0:
+            nudge_step = 1.0
+
+        # sample
+        mv, mx = _sample(*new_pt)
+        N += 1
+
+        #print(mv, best[0] if best else [])
+        # if best == [] or mv > best[0][0]:
+        #     heapq.heappush(best, (1.0/mv, mx, *new_pt))
+
+        #     if len(best) > 20:
+        #         heapq.heappop(best)
+
+        #     max_w = sum(t[0] for t in best)
+
+        if mv < min_V:
+            min_V = mv
+            min_mx = mx
+
+            heapq.heappush(best, (1.0/mv, mx, *new_pt))
+
+            if len(best) > 20:
+                heapq.heappop(best)
+
+            max_w = sum(t[0] for t in best)
+
+            if False:
+                print("V:{:.2f} B:{:.2f} N:{:.2f}".format(1.0/mv, best[-1][0] if best else 0.0, nudge_step))
+                print("uvz:({:.2f} {:.2f} {:.2f})".format(*new_pt))
+
 
     elapsed_time = time.time() - start
-    print('%f seconds' % (elapsed_time))
-    print("final volume %f" % bbox_vol(min_box))     
+    if False:
+        print('%i iterations in %f seconds' % (N, elapsed_time))
+        print('achieved volume %f' % min_V)
+        print('score:', elapsed_time * min_V * 1000)
 
     bme.free() 
 
-    context.object.matrix_world = tr_mx * r_mx * min_mx * sc_mx
+    return tr_mx * r_mx * min_mx * sc_mx, min_V
    
     
 class ObjectMinBoundBox(bpy.types.Operator):
@@ -175,11 +178,6 @@ class ObjectMinBoundBox(bpy.types.Operator):
             name="Iterations",
             description = 'number of random directions to test calipers in',
             default = 400)
-
-    angular_sample = IntProperty(
-            name="Direction samples",
-            description = 'angular step to rotate calipers 90 = 1 degree steps, 180 = 1/2 degree steps',
-            default = 180)
 
     @classmethod
     def poll(cls, context):
@@ -195,14 +193,21 @@ class ObjectMinBoundBox(bpy.types.Operator):
         
         row =layout.row()
         row.prop(self, "area_sample")
-        
-        row =layout.row()
-        row.prop(self, "angular_sample")
     
     
     def execute(self, context):
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
-        main(context, self.area_sample, self.angular_sample)
+        if True:
+            new_mtx, min_vol = main(context, self.area_sample)
+            context.object.matrix_world = new_mtx
+        else:
+            # debug
+            avg_vol = 0
+            for _ in range(500):
+                _, min_vol = main(context, self.area_sample)
+                avg_vol += min_vol
+            print(avg_vol/500)
+
         return {'FINISHED'}
 
 
